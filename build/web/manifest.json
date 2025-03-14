@@ -1,0 +1,53 @@
+{
+    "name": "Prosper Show QR vCard",
+    "short_name": "QR vCard",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#f5f5f5",
+    "theme_color": "#2196F3",
+    "description": "A Progressive Web App for generating and scanning vCard QR codes for the Prosper Show.",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "categories": ["business", "productivity", "utilities"],
+    "screenshots": [
+        {
+            "src": "screenshots/home.png",
+            "sizes": "1280x720",
+            "type": "image/png"
+        },
+        {
+            "src": "screenshots/generate.png",
+            "sizes": "1280x720",
+            "type": "image/png"
+        },
+        {
+            "src": "screenshots/scan.png",
+            "sizes": "1280x720",
+            "type": "image/png"
+        }
+    ],
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}
