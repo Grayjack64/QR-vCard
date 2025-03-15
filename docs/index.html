@@ -29,6 +29,7 @@
 
   <!-- Camera permissions meta tags -->
   <meta name="permissions-policy" content="camera=*, microphone=*">
+  <meta http-equiv="origin-trial" content="">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
@@ -70,6 +71,20 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
+
+    #cameraDebug {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 10px;
+      font-family: monospace;
+      z-index: 9999;
+      max-height: 30vh;
+      overflow-y: auto;
+    }
   </style>
 </head>
 <body>
@@ -77,34 +92,124 @@
   <div class="loading" id="loading">
     <div class="loader"></div>
   </div>
+
+  <!-- Camera debug overlay (hidden by default) -->
+  <div id="cameraDebug" style="display: none;"></div>
   
   <script>
-    // Request camera permission early
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ video: true })
-        .then(function(stream) {
-          console.log('Camera permission granted');
-          // Stop the stream immediately as Flutter will request it again
-          stream.getTracks().forEach(track => track.stop());
-        })
-        .catch(function(error) {
-          console.error('Camera permission denied or error occurred:', error);
-        });
+    // Debug logging function
+    function logDebug(message) {
+      console.log(message);
+      const debugElement = document.getElementById('cameraDebug');
+      if (debugElement) {
+        debugElement.style.display = 'block';
+        const logLine = document.createElement('div');
+        logLine.textContent = message;
+        debugElement.appendChild(logLine);
+        // Scroll to bottom
+        debugElement.scrollTop = debugElement.scrollHeight;
+      }
     }
+
+    // Show available cameras
+    async function listCameras() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cameras = devices.filter(device => device.kind === 'videoinput');
+        logDebug(`Found ${cameras.length} cameras:`);
+        cameras.forEach((camera, index) => {
+          logDebug(`${index+1}: ${camera.label || 'Unnamed camera'}`);
+        });
+        return cameras;
+      } catch (err) {
+        logDebug(`Error listing cameras: ${err.message}`);
+        return [];
+      }
+    }
+
+    // Request camera permission with specific constraints
+    async function requestCamera() {
+      logDebug('Requesting camera permission...');
+      try {
+        // Try to get the back camera if available
+        const cameras = await listCameras();
+        let constraints = { 
+          video: { 
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          } 
+        };
+
+        // If we have a back camera, try to use it specifically
+        if (cameras.length > 1) {
+          // Typically the back camera is listed second
+          const backCamera = cameras[cameras.length > 1 ? 1 : 0];
+          logDebug(`Trying to use camera: ${backCamera.label || 'Unnamed camera'}`);
+          constraints = {
+            video: {
+              deviceId: { exact: backCamera.deviceId },
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            }
+          };
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        logDebug('Camera permission granted!');
+        
+        // Stop the stream immediately
+        stream.getTracks().forEach(track => {
+          logDebug(`Stopping track: ${track.kind}`);
+          track.stop();
+        });
+        
+        return true;
+      } catch (error) {
+        logDebug(`Camera permission error: ${error.name} - ${error.message}`);
+        return false;
+      }
+    }
+
+    // Initialize when page loads
+    window.addEventListener('load', async function() {
+      logDebug('Page loaded, initializing camera...');
+      await requestCamera();
+      
+      // Set a global flag that Flutter can check
+      window.cameraPermissionRequested = true;
+    });
     
     // Register service worker for PWA
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('flutter_service_worker.js?v=509960650');
+        navigator.serviceWorker.register('flutter_service_worker.js?v=509960650')
+          .then(reg => logDebug('Service worker registered'))
+          .catch(err => logDebug(`Service worker error: ${err.message}`));
       });
     }
     
     // Hide loading indicator when app is loaded
     window.addEventListener('flutter-first-frame', function() {
+      logDebug('Flutter app initialized');
       var loadingIndicator = document.getElementById('loading');
       if (loadingIndicator) {
         loadingIndicator.remove();
       }
+    });
+
+    // Double tap to show/hide debug
+    let lastTap = 0;
+    document.addEventListener('touchend', function(event) {
+      const currentTime = new Date().getTime();
+      const tapLength = currentTime - lastTap;
+      if (tapLength < 500 && tapLength > 0) {
+        const debugElement = document.getElementById('cameraDebug');
+        if (debugElement) {
+          debugElement.style.display = debugElement.style.display === 'none' ? 'block' : 'none';
+        }
+      }
+      lastTap = currentTime;
     });
   </script>
   
