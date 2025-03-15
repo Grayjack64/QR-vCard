@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:share_plus/share_plus.dart';
+import 'dart:io' show Platform;
+import 'dart:html' if (dart.library.io) 'dart:io' as html;
 
 import '../models/vcard_model.dart';
 import '../services/database_helper.dart';
@@ -13,13 +16,55 @@ class ScanScreen extends StatefulWidget {
 }
 
 class _ScanScreenState extends State<ScanScreen> {
-  final MobileScannerController _scannerController = MobileScannerController();
+  MobileScannerController? _scannerController;
   bool _hasScanned = false;
   VCardModel? _scannedVCard;
+  bool _isLoading = true;
+  String _errorMessage = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeScanner();
+  }
+
+  Future<void> _initializeScanner() async {
+    try {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = '';
+      });
+
+      // Wait a bit for camera permissions to be established
+      await Future.delayed(const Duration(seconds: 1));
+
+      // Initialize scanner with specific settings
+      _scannerController = MobileScannerController(
+        facing: CameraFacing.back,
+        formats: const [BarcodeFormat.qrCode],
+        // For web, use lower resolution to improve performance
+        detectionSpeed: DetectionSpeed.normal,
+        returnImage: false,
+      );
+
+      // Try to start the scanner
+      await _scannerController!.start();
+
+      setState(() {
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Camera error: ${e.toString()}';
+        print('Scanner initialization error: $e');
+      });
+    }
+  }
 
   @override
   void dispose() {
-    _scannerController.dispose();
+    _scannerController?.dispose();
     super.dispose();
   }
 
@@ -42,7 +87,7 @@ class _ScanScreenState extends State<ScanScreen> {
           _scannedVCard = vcard;
         });
 
-        _scannerController.stop();
+        _scannerController?.stop();
         break;
       }
     }
@@ -52,8 +97,11 @@ class _ScanScreenState extends State<ScanScreen> {
     setState(() {
       _hasScanned = false;
       _scannedVCard = null;
+      _errorMessage = '';
+      _isLoading = true;
     });
-    _scannerController.start();
+
+    _initializeScanner();
   }
 
   void _shareContact() {
@@ -72,11 +120,51 @@ class _ScanScreenState extends State<ScanScreen> {
         title: const Text('Scan QR Code'),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _resetScanner,
+            tooltip: 'Reset Camera',
+          ),
+        ],
       ),
       body: _hasScanned && _scannedVCard != null
           ? _buildContactDetails()
-          : _buildScanner(),
+          : _buildScannerWithState(),
     );
+  }
+
+  Widget _buildScannerWithState() {
+    if (_isLoading) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Initializing camera...'),
+          ],
+        ),
+      );
+    } else if (_errorMessage.isNotEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.red, size: 48),
+            const SizedBox(height: 16),
+            Text(_errorMessage, textAlign: TextAlign.center),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: _resetScanner,
+              child: const Text('Try Again'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      return _buildScanner();
+    }
   }
 
   Widget _buildScanner() {
@@ -86,6 +174,27 @@ class _ScanScreenState extends State<ScanScreen> {
           child: MobileScanner(
             controller: _scannerController,
             onDetect: _onDetect,
+            errorBuilder: (context, error, child) {
+              setState(() {
+                _errorMessage = error.errorDetails?.message ?? 'Camera error';
+              });
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline,
+                        color: Colors.red, size: 48),
+                    const SizedBox(height: 16),
+                    Text(_errorMessage, textAlign: TextAlign.center),
+                    const SizedBox(height: 24),
+                    ElevatedButton(
+                      onPressed: _resetScanner,
+                      child: const Text('Try Again'),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
         ),
         Padding(
