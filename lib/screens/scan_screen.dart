@@ -2,8 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:share_plus/share_plus.dart';
-import 'dart:io' show Platform;
-import 'dart:html' if (dart.library.io) 'dart:io' as html;
+import 'dart:js_util' as js_util;
+import 'dart:js' as js;
+import 'dart:html' as html;
 
 import '../models/vcard_model.dart';
 import '../services/database_helper.dart';
@@ -21,11 +22,63 @@ class _ScanScreenState extends State<ScanScreen> {
   VCardModel? _scannedVCard;
   bool _isLoading = true;
   String _errorMessage = '';
+  bool _isWeb = false;
 
   @override
   void initState() {
     super.initState();
-    _initializeScanner();
+    _isWeb = _checkIfWeb();
+
+    if (_isWeb) {
+      _setupWebQRScanner();
+    } else {
+      _initializeScanner();
+    }
+  }
+
+  bool _checkIfWeb() {
+    try {
+      return identical(0, 0.0);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  void _setupWebQRScanner() {
+    // Register callback for QR code detection
+    js.context['onQRCodeDetected'] = (String qrData) {
+      _processQRData(qrData);
+    };
+
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
+  void _startWebQRScanner() {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final result = js.context.callMethod('startQRScanner');
+
+      if (result == false) {
+        setState(() {
+          _errorMessage = 'Failed to start camera';
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error: $e';
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _initializeScanner() async {
@@ -77,19 +130,27 @@ class _ScanScreenState extends State<ScanScreen> {
       if (barcode.rawValue != null &&
           barcode.rawValue!.contains('BEGIN:VCARD') &&
           barcode.rawValue!.contains('END:VCARD')) {
-        final vcard = VCardModel.fromVCardString(barcode.rawValue!);
-
-        // Save to database
-        await DatabaseHelper.instance.insertContact(vcard);
-
-        setState(() {
-          _hasScanned = true;
-          _scannedVCard = vcard;
-        });
-
-        _scannerController?.stop();
+        _processQRData(barcode.rawValue!);
         break;
       }
+    }
+  }
+
+  void _processQRData(String qrData) async {
+    if (_hasScanned) return;
+
+    if (qrData.contains('BEGIN:VCARD') && qrData.contains('END:VCARD')) {
+      final vcard = VCardModel.fromVCardString(qrData);
+
+      // Save to database
+      await DatabaseHelper.instance.insertContact(vcard);
+
+      setState(() {
+        _hasScanned = true;
+        _scannedVCard = vcard;
+      });
+
+      _scannerController?.stop();
     }
   }
 
@@ -101,7 +162,11 @@ class _ScanScreenState extends State<ScanScreen> {
       _isLoading = true;
     });
 
-    _initializeScanner();
+    if (_isWeb) {
+      _setupWebQRScanner();
+    } else {
+      _initializeScanner();
+    }
   }
 
   void _shareContact() {
@@ -168,45 +233,76 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   Widget _buildScanner() {
-    return Column(
-      children: [
-        Expanded(
-          child: MobileScanner(
-            controller: _scannerController,
-            onDetect: _onDetect,
-            errorBuilder: (context, error, child) {
-              setState(() {
-                _errorMessage = error.errorDetails?.message ?? 'Camera error';
-              });
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.error_outline,
-                        color: Colors.red, size: 48),
-                    const SizedBox(height: 16),
-                    Text(_errorMessage, textAlign: TextAlign.center),
-                    const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: _resetScanner,
-                      child: const Text('Try Again'),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
+    if (_isWeb) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.qr_code_scanner, size: 64, color: Colors.blue),
+            const SizedBox(height: 24),
+            const Text(
+              'Web QR Scanner',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Click the button below to start scanning',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: _startWebQRScanner,
+              icon: const Icon(Icons.camera_alt),
+              label: const Text('Start Camera'),
+              style: ElevatedButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              ),
+            ),
+          ],
         ),
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Text(
-            'Position the QR code within the frame to scan',
-            style: TextStyle(fontSize: 16, color: Colors.grey[700]),
-            textAlign: TextAlign.center,
+      );
+    } else {
+      return Column(
+        children: [
+          Expanded(
+            child: MobileScanner(
+              controller: _scannerController,
+              onDetect: _onDetect,
+              errorBuilder: (context, error, child) {
+                setState(() {
+                  _errorMessage = error.errorDetails?.message ?? 'Camera error';
+                });
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.error_outline,
+                          color: Colors.red, size: 48),
+                      const SizedBox(height: 16),
+                      Text(_errorMessage, textAlign: TextAlign.center),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: _resetScanner,
+                        child: const Text('Try Again'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ),
-        ),
-      ],
-    );
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
+              'Position the QR code within the frame to scan',
+              style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ],
+      );
+    }
   }
 
   Widget _buildContactDetails() {
