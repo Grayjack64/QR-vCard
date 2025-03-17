@@ -3,9 +3,11 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'dart:js' as js;
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/vcard_model.dart';
+import '../services/database_helper.dart';
 
 class ScanScreen extends StatefulWidget {
   const ScanScreen({Key? key}) : super(key: key);
@@ -23,6 +25,7 @@ class _ScanScreenState extends State<ScanScreen> {
   bool _isWeb = false;
   bool _webScannerInitialized = false;
   bool _showFallbackOption = false;
+  VCardModel? _lastScannedContact;
 
   // More reliable browser detection function that works on all devices
   bool isBrowser() {
@@ -40,9 +43,15 @@ class _ScanScreenState extends State<ScanScreen> {
       // Register JavaScript callback for QR code detection
       js.context['onQRCodeDetected'] = (String qrData) {
         try {
+          print(
+              'QR code detected with data: ${qrData.substring(0, math.min(50, qrData.length))}...');
           final vcard = VCardModel.fromVCardString(qrData);
-          // Navigate back with the vCard data
-          Navigator.pop(context, vcard);
+          print('Parsed vCard: ${vcard.name}, ${vcard.company}');
+
+          // Show the contact details popup with delay to ensure UI is ready
+          Future.delayed(Duration(milliseconds: 500), () {
+            _showContactPopup(vcard);
+          });
         } catch (e) {
           setState(() {
             _errorMessage = 'Invalid vCard QR Code: $e';
@@ -80,6 +89,7 @@ class _ScanScreenState extends State<ScanScreen> {
         '''
         try {
           window.webQRScanner.start(function(result) {
+            console.log("QR code detected in JavaScript, sending to Flutter");
             if (window.onQRCodeDetected) {
               window.onQRCodeDetected(result);
             }
@@ -138,15 +148,19 @@ class _ScanScreenState extends State<ScanScreen> {
 
   void _onDetect(BarcodeCapture capture) {
     final List<Barcode> barcodes = capture.barcodes;
+    print('Detected ${barcodes.length} barcodes');
 
     for (final barcode in barcodes) {
       if (barcode.rawValue != null) {
         final String code = barcode.rawValue!;
+        print(
+            'Barcode raw value: ${code.substring(0, math.min(50, code.length))}...');
         try {
           final vcard = VCardModel.fromVCardString(code);
+          print('Successfully parsed vCard: ${vcard.name}, ${vcard.company}');
 
-          // Navigate back with the vCard data
-          Navigator.pop(context, vcard);
+          // Handle the successful scan
+          _handleSuccessfulScan(vcard);
           return;
         } catch (e) {
           setState(() {
@@ -156,6 +170,187 @@ class _ScanScreenState extends State<ScanScreen> {
         }
       }
     }
+  }
+
+  // Handle successful scan with separate UI update and database operation
+  void _handleSuccessfulScan(VCardModel vcard) {
+    // Stop the scanner immediately
+    if (_scannerController != null) {
+      _scannerController!.stop();
+    }
+
+    // Update state with the scanned contact
+    setState(() {
+      _lastScannedContact = vcard;
+    });
+
+    // Show the popup
+    _showContactPopup(vcard);
+
+    // Save to database in the background
+    _saveContact(vcard);
+  }
+
+  // Save contact to database
+  Future<void> _saveContact(VCardModel vcard) async {
+    try {
+      print('Saving contact to database: ${vcard.name}');
+      final id = await DatabaseHelper.instance.insertContact(vcard);
+      print('Contact saved with ID: $id');
+    } catch (e) {
+      print('Error saving contact: $e');
+      // Silently fail, user can still see the contact in the popup
+    }
+  }
+
+  // Show popup with contact details
+  void _showContactPopup(VCardModel vcard) {
+    print('Showing contact popup for: ${vcard.name}');
+
+    if (!mounted) {
+      print('Widget no longer mounted, cannot show popup');
+      return;
+    }
+
+    // Use a simpler approach with a bottom sheet instead of dialog
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (_, scrollController) => Container(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Center(
+                child: Text(
+                  'Contact Scanned!',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).primaryColor,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Expanded(
+                child: ListView(
+                  controller: scrollController,
+                  children: [
+                    _buildContactField('Name', vcard.name),
+                    _buildContactField('Company', vcard.company),
+                    if (vcard.title.isNotEmpty)
+                      _buildContactField('Title', vcard.title),
+                    if (vcard.email.isNotEmpty)
+                      _buildContactField('Email', vcard.email),
+                    if (vcard.phone.isNotEmpty)
+                      _buildContactField('Phone', vcard.phone),
+                    if (vcard.website.isNotEmpty)
+                      _buildContactField('Website', vcard.website),
+                    if (vcard.address.isNotEmpty)
+                      _buildContactField('Address', vcard.address),
+                    const SizedBox(height: 10),
+                    Center(
+                      child: Text(
+                        'Contact has been saved to your history',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.green,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.pop(context); // Close the sheet
+                        // Reset and continue scanning
+                        if (_isWeb) {
+                          _startWebScanner();
+                        } else if (_scannerController != null) {
+                          _scannerController!.start();
+                        }
+                      },
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: const Text('Scan Another'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context); // Close the sheet
+                        Navigator.pop(
+                            context, vcard); // Return to previous screen
+                      },
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: const Text('Done'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContactField(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.grey,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 16,
+            ),
+          ),
+          const Divider(height: 16),
+        ],
+      ),
+    );
   }
 
   @override
