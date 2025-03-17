@@ -88,6 +88,8 @@
       max-height: 30vh;
       overflow-y: auto;
       display: none; /* Hide by default */
+      font-size: 10px; /* Smaller text to not block UI */
+      opacity: 0.8; /* Semi-transparent */
     }
     
     #qrScannerContainer {
@@ -164,7 +166,7 @@
     <div class="loader"></div>
   </div>
 
-  <!-- Camera debug overlay (hidden by default) -->
+  <!-- Camera debug overlay (completely hidden by default) -->
   <div id="cameraDebug" style="display: none;"></div>
   
   <!-- QR Scanner Container -->
@@ -179,13 +181,19 @@
   </div>
   
   <script>
+    // Debug toggle flag
+    let debugVisible = false;
+    
     // Debug logging function
     function logDebug(message, isError = false) {
       console.log(message);
+      // Don't show debug overlay for normal messages
+      if (!debugVisible && !isError) return;
+      
       const debugElement = document.getElementById('cameraDebug');
       if (debugElement) {
-        // Only show debug overlay for errors
         if (isError) {
+          // Make sure the debug is shown for errors
           debugElement.style.display = 'block';
         }
         
