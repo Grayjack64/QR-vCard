@@ -92,6 +92,23 @@
       opacity: 0.8; /* Semi-transparent */
     }
     
+    #debugToggle {
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.5);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    }
+    
     #qrScannerContainer {
       display: none;
       position: fixed;
@@ -168,6 +185,9 @@
 
   <!-- Camera debug overlay (completely hidden by default) -->
   <div id="cameraDebug" style="display: none;"></div>
+  
+  <!-- Debug toggle button -->
+  <button id="debugToggle">🐞</button>
   
   <!-- QR Scanner Container -->
   <div id="qrScannerContainer">
@@ -394,15 +414,26 @@
     
     // Function to start scanning (called from Flutter)
     window.startQRScanner = function() {
-      return window.webQRScanner.start((result) => {
-        // Send result back to Flutter
-        if (window.flutter_inappwebview) {
-          window.flutter_inappwebview.callHandler('onQRCodeDetected', result);
-        } else {
-          // For standard Flutter web
-          window.onQRCodeDetected(result);
-        }
-      });
+      logDebug('startQRScanner called from Flutter');
+      try {
+        return window.webQRScanner.start((result) => {
+          logDebug('QR code detected: ' + result.substring(0, 30) + '...');
+          // Send result back to Flutter
+          if (window.flutter_inappwebview) {
+            window.flutter_inappwebview.callHandler('onQRCodeDetected', result);
+          } else {
+            // For standard Flutter web
+            if (typeof window.onQRCodeDetected === 'function') {
+              window.onQRCodeDetected(result);
+            } else {
+              logError('onQRCodeDetected function not found!');
+            }
+          }
+        });
+      } catch (e) {
+        logError('Error starting QR scanner: ' + e.message);
+        return false;
+      }
     };
 
     // Initialize when page loads
@@ -432,18 +463,13 @@
       }
     });
 
-    // Double tap to show/hide debug
-    let lastTap = 0;
-    document.addEventListener('touchend', function(event) {
-      const currentTime = new Date().getTime();
-      const tapLength = currentTime - lastTap;
-      if (tapLength < 500 && tapLength > 0) {
-        const debugElement = document.getElementById('cameraDebug');
-        if (debugElement) {
-          debugElement.style.display = debugElement.style.display === 'none' ? 'block' : 'none';
-        }
+    // Setup debug toggle button
+    document.getElementById('debugToggle').addEventListener('click', function() {
+      const debugElement = document.getElementById('cameraDebug');
+      debugVisible = !debugVisible;
+      if (debugElement) {
+        debugElement.style.display = debugVisible ? 'block' : 'none';
       }
-      lastTap = currentTime;
     });
   </script>
   

@@ -35,6 +35,20 @@ class _ScanScreenState extends State<ScanScreen> {
     _isWeb = isBrowser();
 
     if (_isWeb) {
+      // Register JavaScript callback for QR code detection
+      js.context['onQRCodeDetected'] = (String qrData) {
+        try {
+          final vcard = VCardModel.fromVCardString(qrData);
+          // Navigate back with the vCard data
+          Navigator.pop(context, vcard);
+        } catch (e) {
+          setState(() {
+            _errorMessage = 'Invalid vCard QR Code: $e';
+          });
+          print('Error parsing vCard: $e');
+        }
+      };
+
       // Web-specific initialization
       _initializeWebScanner();
     } else {
@@ -59,7 +73,7 @@ class _ScanScreenState extends State<ScanScreen> {
 
     try {
       // Call JavaScript function to start the scanner
-      js.context.callMethod('startScanner');
+      js.context.callMethod('startQRScanner');
       setState(() {
         _webScannerInitialized = true;
       });
