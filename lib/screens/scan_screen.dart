@@ -26,6 +26,7 @@ class _ScanScreenState extends State<ScanScreen> {
   bool _webScannerInitialized = false;
   bool _showFallbackOption = false;
   VCardModel? _lastScannedContact;
+  bool _cameraStarting = false;
 
   // More reliable browser detection function that works on all devices
   bool isBrowser() {
@@ -42,9 +43,9 @@ class _ScanScreenState extends State<ScanScreen> {
     if (_isWeb) {
       // Register JavaScript callback for QR code detection
       js.context['onQRCodeDetected'] = (String qrData) {
+        print(
+            'QR code detected callback with data: ${qrData.substring(0, math.min(50, qrData.length))}...');
         try {
-          print(
-              'QR code detected with data: ${qrData.substring(0, math.min(50, qrData.length))}...');
           final vcard = VCardModel.fromVCardString(qrData);
           print('Parsed vCard: ${vcard.name}, ${vcard.company}');
 
@@ -60,7 +61,19 @@ class _ScanScreenState extends State<ScanScreen> {
         }
       };
 
-      // Web-specific initialization
+      // Register error callback from JavaScript
+      js.context['onQRScannerError'] = (String errorMsg) {
+        print('Error from QR scanner: $errorMsg');
+        setState(() {
+          _errorMessage = errorMsg;
+          _showErrorIcon = true;
+          _showFallbackOption = true;
+          _isLoading = false;
+          _cameraStarting = false;
+        });
+      };
+
+      // Initialize and automatically start web scanner
       _initializeWebScanner();
     } else {
       // Mobile-specific initialization
@@ -70,44 +83,193 @@ class _ScanScreenState extends State<ScanScreen> {
 
   // Web scanner initialization
   void _initializeWebScanner() {
+    print('Initializing web scanner...');
+
     setState(() {
-      _isLoading = false;
-      _hasPermission = true;
+      _isLoading = true;
+      _cameraStarting = true;
     });
 
-    // Web scanner will be initialized on button press
+    // Inject JavaScript to setup QR scanner if needed
+    js.context.callMethod('eval', [
+      '''
+      if (typeof window.webQRScanner === 'undefined') {
+        console.log("Initializing web QR scanner...");
+        window.webQRScanner = {
+          scanner: null,
+          start: function(callback) {
+            console.log("Starting web QR scanner...");
+            try {
+              // Create HTML elements for camera
+              var videoElement = document.getElementById('qr-video');
+              if (!videoElement) {
+                var scannerContainer = document.createElement('div');
+                scannerContainer.id = 'scanner-container';
+                scannerContainer.style.width = '100%';
+                scannerContainer.style.height = '100%';
+                scannerContainer.style.display = 'flex';
+                scannerContainer.style.position = 'absolute';
+                scannerContainer.style.top = '0';
+                scannerContainer.style.left = '0';
+                scannerContainer.style.backgroundColor = 'black';
+                scannerContainer.style.zIndex = '999';
+                
+                videoElement = document.createElement('video');
+                videoElement.id = 'qr-video';
+                videoElement.style.width = '100%';
+                videoElement.style.height = '100%';
+                videoElement.style.objectFit = 'cover';
+                
+                scannerContainer.appendChild(videoElement);
+                document.body.appendChild(scannerContainer);
+              }
+              
+              // Start camera
+              navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment' }
+              }).then(function(stream) {
+                videoElement.srcObject = stream;
+                videoElement.play();
+                
+                // Setup canvas and context for scanning
+                var canvas = document.createElement('canvas');
+                var context = canvas.getContext('2d');
+                var scanning = true;
+                
+                // Scan function
+                var scan = function() {
+                  if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA && scanning) {
+                    canvas.height = videoElement.videoHeight;
+                    canvas.width = videoElement.videoWidth;
+                    context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                    
+                    try {
+                      // Use jsQR library if available
+                      if (typeof jsQR === 'function') {
+                        var imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                        var code = jsQR(imageData.data, imageData.width, imageData.height);
+                        
+                        if (code && code.data) {
+                          console.log("QR Code found:", code.data.substring(0, 50) + "...");
+                          callback(code.data);
+                          scanning = false;
+                          
+                          // Stop the camera
+                          var stream = videoElement.srcObject;
+                          var tracks = stream.getTracks();
+                          tracks.forEach(function(track) {
+                            track.stop();
+                          });
+                          
+                          // Remove scanner container after a delay
+                          setTimeout(function() {
+                            if (document.getElementById('scanner-container')) {
+                              document.getElementById('scanner-container').remove();
+                            }
+                          }, 500);
+                        }
+                      }
+                    } catch (e) {
+                      console.error("Scanning error:", e);
+                    }
+                    
+                    if (scanning) {
+                      requestAnimationFrame(scan);
+                    }
+                  } else {
+                    requestAnimationFrame(scan);
+                  }
+                };
+                
+                // Start scanning
+                requestAnimationFrame(scan);
+                
+                console.log("Camera started successfully");
+              }).catch(function(error) {
+                console.error("Camera access error:", error);
+                if (document.getElementById('scanner-container')) {
+                  document.getElementById('scanner-container').remove();
+                }
+              });
+            } catch (e) {
+              console.error("Scanner initialization error:", e);
+            }
+          },
+          stop: function() {
+            var videoElement = document.getElementById('qr-video');
+            if (videoElement && videoElement.srcObject) {
+              var stream = videoElement.srcObject;
+              var tracks = stream.getTracks();
+              tracks.forEach(function(track) {
+                track.stop();
+              });
+            }
+            
+            if (document.getElementById('scanner-container')) {
+              document.getElementById('scanner-container').remove();
+            }
+          }
+        };
+      }
+      '''
+    ]);
+
+    // Start web scanner with a short delay to ensure JS is ready
+    Future.delayed(Duration(milliseconds: 1000), () {
+      _startWebScanner();
+    });
   }
 
-  // Start web scanner when the button is pressed
+  // Start web scanner automatically
   void _startWebScanner() {
     if (_webScannerInitialized) return;
 
     try {
-      // Directly use webQRScanner.start instead of startQRScanner
-      // This matches what the "Test Camera Directly" button does
+      print('Starting web scanner automatically...');
       js.context.callMethod('eval', [
         '''
         try {
+          console.log("Starting web QR scanner from Flutter...");
+          if (typeof window.webQRScanner === 'undefined') {
+            console.error("webQRScanner is not defined");
+            if (window.onQRScannerError) {
+              window.onQRScannerError("QR scanner not available. Please try again or use a different browser.");
+            }
+            return;
+          }
+          
           window.webQRScanner.start(function(result) {
-            console.log("QR code detected in JavaScript, sending to Flutter");
+            console.log("QR code detected in JavaScript, sending to Flutter: " + result.substring(0, 50) + "...");
             if (window.onQRCodeDetected) {
               window.onQRCodeDetected(result);
+            } else {
+              console.error("onQRCodeDetected callback not registered");
+              if (window.onQRScannerError) {
+                window.onQRScannerError("Callback not registered. Please refresh the page and try again.");
+              }
             }
           });
         } catch (e) {
           console.error("Error starting scanner:", e);
+          if (window.onQRScannerError) {
+            window.onQRScannerError("Error starting scanner: " + e.message);
+          }
         }
       '''
       ]);
 
       setState(() {
         _webScannerInitialized = true;
+        _isLoading = false;
+        _cameraStarting = false;
       });
     } catch (e) {
       setState(() {
         _errorMessage = 'Failed to start web scanner: $e';
         _showErrorIcon = true;
         _showFallbackOption = true;
+        _isLoading = false;
+        _cameraStarting = false;
       });
       print('Error starting web scanner: $e');
     }
@@ -360,60 +522,76 @@ class _ScanScreenState extends State<ScanScreen> {
         title: Text('Scan QR Code'),
       ),
       body: Center(
-        child: _isLoading ? CircularProgressIndicator() : _renderContent(),
+        child:
+            _isLoading ? const CircularProgressIndicator() : _renderContent(),
       ),
     );
   }
 
   Widget _renderContent() {
     if (_isWeb) {
-      // Web platform - show start scanner button
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text('Web QR Scanner',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-          SizedBox(height: 20),
-          if (!_webScannerInitialized)
-            ElevatedButton(
-              onPressed: _startWebScanner,
-              child: Text('Start Camera'),
-              style: ElevatedButton.styleFrom(
-                padding: EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-              ),
-            ),
-          if (_webScannerInitialized)
-            Text('Camera active - point at a QR code',
-                style: TextStyle(color: Colors.green)),
-          if (_errorMessage.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text(
-                _errorMessage,
-                style: TextStyle(color: Colors.red),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          if (_showFallbackOption)
-            Padding(
-              padding: const EdgeInsets.only(top: 20.0),
-              child: Column(
+      // Web platform - show active camera status
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (_cameraStarting)
+              Column(
                 children: [
-                  Text('Having trouble with the camera?',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  SizedBox(height: 10),
-                  ElevatedButton.icon(
-                    onPressed: _openFallbackScanner,
-                    icon: Icon(Icons.launch),
-                    label: Text('Try Standalone Scanner'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                    ),
-                  ),
+                  CircularProgressIndicator(),
+                  SizedBox(height: 20),
                 ],
               ),
+            Text(
+              _webScannerInitialized
+                  ? 'Camera active - point at a QR code'
+                  : 'Starting camera...',
+              style: TextStyle(
+                color: _webScannerInitialized ? Colors.green : Colors.blue,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
             ),
-        ],
+            SizedBox(height: 16),
+            Text(
+              'The camera should activate automatically',
+              style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'Please allow camera access if prompted',
+              style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+            ),
+            if (_errorMessage.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(
+                  _errorMessage,
+                  style: TextStyle(color: Colors.red),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            if (_showFallbackOption)
+              Padding(
+                padding: const EdgeInsets.only(top: 20.0),
+                child: Column(
+                  children: [
+                    Text('Having trouble with the camera?',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    SizedBox(height: 10),
+                    ElevatedButton.icon(
+                      onPressed: _openFallbackScanner,
+                      icon: Icon(Icons.launch),
+                      label: Text('Try Standalone Scanner'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       );
     } else {
       // Mobile platform

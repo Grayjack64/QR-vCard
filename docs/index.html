@@ -37,6 +37,9 @@
   <meta name="theme-color" content="#2196F3">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   
+  <!-- QR Code Scanner Library -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  
   <style>
     body {
       background-color: #f5f5f5;
@@ -79,7 +82,7 @@
     // Register service worker for PWA
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('flutter_service_worker.js?v=4195080096');
+        navigator.serviceWorker.register('flutter_service_worker.js?v=85075603');
       });
     }
     
@@ -90,6 +93,128 @@
         loadingIndicator.remove();
       }
     });
+    
+    // QR Scanner Implementation
+    window.webQRScanner = {
+      scanner: null,
+      start: function(callback) {
+        console.log("Starting web QR scanner...");
+        try {
+          // Create HTML elements for camera
+          var videoElement = document.getElementById('qr-video');
+          if (!videoElement) {
+            var scannerContainer = document.createElement('div');
+            scannerContainer.id = 'scanner-container';
+            scannerContainer.style.width = '100%';
+            scannerContainer.style.height = '100%';
+            scannerContainer.style.display = 'flex';
+            scannerContainer.style.position = 'absolute';
+            scannerContainer.style.top = '0';
+            scannerContainer.style.left = '0';
+            scannerContainer.style.backgroundColor = 'black';
+            scannerContainer.style.zIndex = '999';
+            
+            videoElement = document.createElement('video');
+            videoElement.id = 'qr-video';
+            videoElement.style.width = '100%';
+            videoElement.style.height = '100%';
+            videoElement.style.objectFit = 'cover';
+            
+            scannerContainer.appendChild(videoElement);
+            document.body.appendChild(scannerContainer);
+          }
+          
+          // Start camera
+          navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment' }
+          }).then(function(stream) {
+            videoElement.srcObject = stream;
+            videoElement.play();
+            
+            // Setup canvas and context for scanning
+            var canvas = document.createElement('canvas');
+            var context = canvas.getContext('2d');
+            var scanning = true;
+            
+            // Scan function
+            var scan = function() {
+              if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA && scanning) {
+                canvas.height = videoElement.videoHeight;
+                canvas.width = videoElement.videoWidth;
+                context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                
+                try {
+                  var imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                  var code = jsQR(imageData.data, imageData.width, imageData.height);
+                  
+                  if (code && code.data) {
+                    console.log("QR Code found:", code.data.substring(0, 50) + "...");
+                    callback(code.data);
+                    scanning = false;
+                    
+                    // Stop the camera
+                    var stream = videoElement.srcObject;
+                    var tracks = stream.getTracks();
+                    tracks.forEach(function(track) {
+                      track.stop();
+                    });
+                    
+                    // Remove scanner container after a delay
+                    setTimeout(function() {
+                      if (document.getElementById('scanner-container')) {
+                        document.getElementById('scanner-container').remove();
+                      }
+                    }, 500);
+                  }
+                } catch (e) {
+                  console.error("Scanning error:", e);
+                }
+                
+                if (scanning) {
+                  requestAnimationFrame(scan);
+                }
+              } else {
+                requestAnimationFrame(scan);
+              }
+            };
+            
+            // Start scanning
+            requestAnimationFrame(scan);
+            
+            console.log("Camera started successfully");
+          }).catch(function(error) {
+            console.error("Camera access error:", error);
+            if (document.getElementById('scanner-container')) {
+              document.getElementById('scanner-container').remove();
+            }
+            
+            // Notify Flutter about the error
+            if (window.onQRScannerError) {
+              window.onQRScannerError("Camera access denied: " + error.message);
+            }
+          });
+        } catch (e) {
+          console.error("Scanner initialization error:", e);
+          if (window.onQRScannerError) {
+            window.onQRScannerError("Scanner initialization error: " + e.message);
+          }
+        }
+      },
+      stop: function() {
+        var videoElement = document.getElementById('qr-video');
+        if (videoElement && videoElement.srcObject) {
+          var stream = videoElement.srcObject;
+          var tracks = stream.getTracks();
+          tracks.forEach(function(track) {
+            track.stop();
+          });
+        }
+        
+        if (document.getElementById('scanner-container')) {
+          document.getElementById('scanner-container').remove();
+        }
+      }
+    };
   </script>
   
   <script src="flutter_bootstrap.js" async></script>
