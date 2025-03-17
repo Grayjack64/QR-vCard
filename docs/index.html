@@ -87,6 +87,7 @@
       z-index: 9999;
       max-height: 30vh;
       overflow-y: auto;
+      display: none; /* Hide by default */
     }
     
     #qrScannerContainer {
@@ -179,17 +180,34 @@
   
   <script>
     // Debug logging function
-    function logDebug(message) {
+    function logDebug(message, isError = false) {
       console.log(message);
       const debugElement = document.getElementById('cameraDebug');
       if (debugElement) {
-        debugElement.style.display = 'block';
+        // Only show debug overlay for errors
+        if (isError) {
+          debugElement.style.display = 'block';
+        }
+        
         const logLine = document.createElement('div');
         logLine.textContent = message;
+        
+        // Style errors differently
+        if (isError) {
+          logLine.style.color = '#ff6b6b';
+          logLine.style.fontWeight = 'bold';
+        }
+        
         debugElement.appendChild(logLine);
         // Scroll to bottom
         debugElement.scrollTop = debugElement.scrollHeight;
       }
+    }
+
+    // Function to log errors
+    function logError(message) {
+      console.error(message);
+      logDebug(`ERROR: ${message}`, true);
     }
 
     // Show available cameras
@@ -203,7 +221,7 @@
         });
         return cameras;
       } catch (err) {
-        logDebug(`Error listing cameras: ${err.message}`);
+        logError(`Error listing cameras: ${err.message}`);
         return [];
       }
     }
@@ -247,7 +265,7 @@
         
         return true;
       } catch (error) {
-        logDebug(`Camera permission error: ${error.name} - ${error.message}`);
+        logError(`Camera permission error: ${error.name} - ${error.message}`);
         return false;
       }
     }
@@ -309,7 +327,7 @@
           logDebug('Web QR scanner started');
           return true;
         } catch (error) {
-          logDebug(`Web QR scanner error: ${error.message}`);
+          logError(`Web QR scanner error: ${error.message}`);
           return false;
         }
       }
@@ -393,7 +411,7 @@
       window.addEventListener('load', function () {
         navigator.serviceWorker.register('flutter_service_worker.js?v=509960650')
           .then(reg => logDebug('Service worker registered'))
-          .catch(err => logDebug(`Service worker error: ${err.message}`));
+          .catch(err => logError(`Service worker error: ${err.message}`));
       });
     }
     

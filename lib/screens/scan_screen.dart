@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import 'dart:js_util' as js_util;
 import 'dart:js' as js;
 import 'dart:html' as html;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../models/vcard_model.dart';
 import '../services/database_helper.dart';
@@ -27,7 +28,7 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   void initState() {
     super.initState();
-    _isWeb = _checkIfWeb();
+    _isWeb = kIsWeb;
 
     if (_isWeb) {
       _setupWebQRScanner();
@@ -36,19 +37,13 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
-  bool _checkIfWeb() {
-    try {
-      return identical(0, 0.0);
-    } catch (e) {
-      return false;
-    }
-  }
-
   void _setupWebQRScanner() {
     // Register callback for QR code detection
-    js.context['onQRCodeDetected'] = (String qrData) {
-      _processQRData(qrData);
-    };
+    if (_isWeb) {
+      js.context['onQRCodeDetected'] = (String qrData) {
+        _processQRData(qrData);
+      };
+    }
 
     setState(() {
       _isLoading = false;
@@ -56,8 +51,11 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   void _startWebQRScanner() {
+    if (!_isWeb) return;
+
     setState(() {
       _isLoading = true;
+      _errorMessage = '';
     });
 
     try {
@@ -65,7 +63,8 @@ class _ScanScreenState extends State<ScanScreen> {
 
       if (result == false) {
         setState(() {
-          _errorMessage = 'Failed to start camera';
+          _errorMessage =
+              'Failed to start camera. Please make sure you\'ve granted camera permissions.';
           _isLoading = false;
         });
       } else {
@@ -107,9 +106,21 @@ class _ScanScreenState extends State<ScanScreen> {
         _isLoading = false;
       });
     } catch (e) {
+      String errorMsg = e.toString();
+
+      // Provide more user-friendly error messages
+      if (errorMsg.contains('permission') || errorMsg.contains('Permission')) {
+        errorMsg =
+            'Camera permission denied. Please enable camera access in your device settings.';
+      } else if (errorMsg.contains('available') ||
+          errorMsg.contains('Available')) {
+        errorMsg =
+            'No camera available. Please ensure your device has a working camera.';
+      }
+
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Camera error: ${e.toString()}';
+        _errorMessage = 'Camera error: $errorMsg';
         print('Scanner initialization error: $e');
       });
     }
