@@ -74,19 +74,21 @@ class _ScanScreenState extends State<ScanScreen> {
     if (_webScannerInitialized) return;
 
     try {
-      // Call JavaScript function to start the scanner
-      final bool success = js.context.callMethod('startQRScanner');
-
-      if (success == false) {
-        // If the scanner fails to start, show the fallback option
-        setState(() {
-          _errorMessage =
-              'Failed to access camera. Try the standalone scanner instead.';
-          _showErrorIcon = true;
-          _showFallbackOption = true;
-        });
-        return;
-      }
+      // Directly use webQRScanner.start instead of startQRScanner
+      // This matches what the "Test Camera Directly" button does
+      js.context.callMethod('eval', [
+        '''
+        try {
+          window.webQRScanner.start(function(result) {
+            if (window.onQRCodeDetected) {
+              window.onQRCodeDetected(result);
+            }
+          });
+        } catch (e) {
+          console.error("Error starting scanner:", e);
+        }
+      '''
+      ]);
 
       setState(() {
         _webScannerInitialized = true;

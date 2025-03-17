@@ -9,7 +9,6 @@
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "categories": ["business", "productivity", "utilities"],
-    "permissions": ["camera"],
     "screenshots": [
         {
             "src": "screenshots/home.png",

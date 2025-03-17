@@ -27,6 +27,10 @@
   <meta name="apple-mobile-web-app-title" content="Prosper Show QR vCard">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
+  <!-- Camera permissions meta tags -->
+  <meta name="permissions-policy" content="camera=*, microphone=*">
+  <meta http-equiv="origin-trial" content="">
+
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
@@ -36,6 +40,22 @@
   <!-- PWA specific meta tags -->
   <meta name="theme-color" content="#2196F3">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  
+  <!-- Add jsQR library for QR scanning -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  
+  <!-- Add a fallback in case CDN fails -->
+  <script>
+    // Check if jsQR loaded
+    if (typeof jsQR !== 'function') {
+      console.error('jsQR library failed to load from CDN, attempting to load from fallback');
+      // Create a new script element
+      var jsQRScript = document.createElement('script');
+      jsQRScript.src = 'https://unpkg.com/jsqr@1.4.0/dist/jsQR.min.js';
+      jsQRScript.async = false;
+      document.head.appendChild(jsQRScript);
+    }
+  </script>
   
   <style>
     body {
@@ -67,6 +87,73 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
+    
+    #qrScannerContainer {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 999;
+      background-color: #000;
+    }
+    
+    #qrScannerVideo {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    
+    #qrScannerCanvas {
+      display: none;
+    }
+    
+    .scanner-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    
+    .scanner-frame {
+      width: 250px;
+      height: 250px;
+      border: 2px solid #fff;
+      border-radius: 10px;
+      box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.5);
+    }
+    
+    .scanner-instructions {
+      color: white;
+      margin-top: 20px;
+      text-align: center;
+      padding: 0 20px;
+    }
+    
+    .scanner-close {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      color: white;
+      background: rgba(0, 0, 0, 0.5);
+      border: none;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      pointer-events: auto;
+    }
   </style>
 </head>
 <body>
@@ -75,16 +162,322 @@
     <div class="loader"></div>
   </div>
   
+  <!-- QR Scanner Container -->
+  <div id="qrScannerContainer">
+    <video id="qrScannerVideo" playsinline></video>
+    <canvas id="qrScannerCanvas"></canvas>
+    <div class="scanner-overlay">
+      <div class="scanner-frame"></div>
+      <div class="scanner-instructions">Position the QR code within the frame to scan</div>
+    </div>
+    <button class="scanner-close" id="qrScannerClose">✕</button>
+  </div>
+  
   <script>
+    // Function to log errors (quietly to console only)
+    function logError(message) {
+      console.error(message);
+    }
+
+    // Show available cameras
+    async function listCameras() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cameras = devices.filter(device => device.kind === 'videoinput');
+        console.log(`Found ${cameras.length} cameras`);
+        return cameras;
+      } catch (err) {
+        console.error(`Error listing cameras: ${err.message}`);
+        return [];
+      }
+    }
+
+    // Request camera permission with specific constraints
+    async function requestCamera() {
+      console.log('Requesting camera permission...');
+      try {
+        // Try to get the back camera if available
+        const cameras = await listCameras();
+        let constraints = { 
+          video: { 
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          } 
+        };
+
+        // If we have a back camera, try to use it specifically
+        if (cameras.length > 1) {
+          // Typically the back camera is listed second
+          const backCamera = cameras[cameras.length > 1 ? 1 : 0];
+          console.log(`Trying to use camera: ${backCamera.label || 'Unnamed camera'}`);
+          constraints = {
+            video: {
+              deviceId: { exact: backCamera.deviceId },
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            }
+          };
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log('Camera permission granted!');
+        
+        // Stop the stream immediately
+        stream.getTracks().forEach(track => {
+          track.stop();
+        });
+        
+        return true;
+      } catch (error) {
+        console.error(`Camera permission error: ${error.name} - ${error.message}`);
+        return false;
+      }
+    }
+    
+    // Web QR Scanner Implementation
+    class WebQRScanner {
+      constructor() {
+        this.video = document.getElementById('qrScannerVideo');
+        this.canvas = document.getElementById('qrScannerCanvas');
+        this.container = document.getElementById('qrScannerContainer');
+        this.closeButton = document.getElementById('qrScannerClose');
+        this.ctx = this.canvas.getContext('2d');
+        this.stream = null;
+        this.scanning = false;
+        this.onDetectedCallback = null;
+        
+        // Set up close button
+        this.closeButton.addEventListener('click', () => this.close());
+      }
+      
+      async start(callback) {
+        console.log('Starting web QR scanner');
+        this.onDetectedCallback = callback;
+        
+        try {
+          // Verify DOM elements
+          if (!this.video || !this.canvas || !this.container) {
+            console.error('QR Scanner DOM elements not found');
+            return false;
+          }
+          
+          // Get camera stream
+          console.log('Requesting camera access...');
+          const constraints = { 
+            video: { 
+              facingMode: 'environment',
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            },
+            audio: false
+          };
+          
+          try {
+            this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+            console.log('Camera access granted!');
+          } catch (cameraError) {
+            console.error(`Camera access denied: ${cameraError.name} - ${cameraError.message}`);
+            
+            // Try a simpler approach as fallback
+            console.log('Trying fallback camera access...');
+            try {
+              this.stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+              console.log('Fallback camera access granted!');
+            } catch (fallbackError) {
+              console.error(`Fallback camera access failed: ${fallbackError.message}`);
+              return false;
+            }
+          }
+          
+          // Set video source
+          this.video.srcObject = this.stream;
+          this.video.setAttribute('playsinline', true);
+          this.video.setAttribute('autoplay', true);
+          
+          console.log('Video element configured, waiting for metadata...');
+          
+          // Wait for video to be ready
+          await new Promise((resolve, reject) => {
+            this.video.onloadedmetadata = () => {
+              console.log('Video metadata loaded');
+              resolve();
+            };
+            this.video.onerror = (e) => {
+              console.error(`Video error: ${e}`);
+              reject(new Error('Video loading failed'));
+            };
+            // Add a timeout
+            setTimeout(() => {
+              if (this.video.readyState === 0) {
+                console.error('Video metadata loading timeout');
+                reject(new Error('Video metadata loading timeout'));
+              }
+            }, 5000);
+          });
+          
+          console.log('Playing video...');
+          try {
+            await this.video.play();
+            console.log('Video playing!');
+          } catch (playError) {
+            console.error(`Video play error: ${playError.message}`);
+            return false;
+          }
+          
+          // Set canvas dimensions
+          this.canvas.width = this.video.videoWidth || 640;
+          this.canvas.height = this.video.videoHeight || 480;
+          
+          console.log(`Canvas size set to ${this.canvas.width}x${this.canvas.height}`);
+          
+          // Show scanner
+          this.container.style.display = 'block';
+          
+          // Start scanning
+          this.scanning = true;
+          this.scanQRCode();
+          
+          console.log('Web QR scanner started successfully');
+          return true;
+        } catch (error) {
+          console.error(`Web QR scanner error: ${error.message}`);
+          return false;
+        }
+      }
+      
+      scanQRCode() {
+        if (!this.scanning) return;
+        
+        try {
+          // Check if video is ready
+          if (!this.video.videoWidth || !this.video.videoHeight) {
+            setTimeout(() => this.scanQRCode(), 500);
+            return;
+          }
+          
+          // Draw video frame to canvas
+          this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
+          
+          // Get image data
+          const imageData = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+          
+          // Check if jsQR is available
+          if (typeof jsQR !== 'function') {
+            console.error('jsQR not available for scanning');
+            setTimeout(() => this.scanQRCode(), 1000);
+            return;
+          }
+          
+          // Scan for QR code
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "dontInvert",
+          });
+          
+          if (code && code.data) {
+            console.log(`QR code detected: ${code.data.substring(0, 30)}...`);
+            
+            // Check if it's a vCard
+            if (code.data.includes('BEGIN:VCARD') && code.data.includes('END:VCARD')) {
+              console.log('Valid vCard QR code detected!');
+              // Call callback with result
+              if (this.onDetectedCallback) {
+                this.onDetectedCallback(code.data);
+              }
+              
+              // Stop scanning
+              this.close();
+              return;
+            } else {
+              console.log('QR code does not contain vCard data, continuing scan...');
+            }
+          }
+          
+          // Continue scanning
+          requestAnimationFrame(() => this.scanQRCode());
+        } catch (error) {
+          console.error(`Error in QR scanning: ${error.message}`);
+          // Try to continue scanning despite error
+          setTimeout(() => this.scanQRCode(), 1000);
+        }
+      }
+      
+      close() {
+        console.log('Closing web QR scanner');
+        this.scanning = false;
+        
+        // Hide scanner
+        this.container.style.display = 'none';
+        
+        // Stop video stream
+        if (this.stream) {
+          this.stream.getTracks().forEach(track => track.stop());
+          this.stream = null;
+        }
+      }
+    }
+    
+    // Create global scanner instance
+    window.webQRScanner = new WebQRScanner();
+    
+    // Function to start scanning (called from Flutter)
+    window.startQRScanner = function() {
+      console.log('startQRScanner called from Flutter');
+      
+      try {
+        // Check if jsQR is available
+        if (typeof jsQR !== 'function') {
+          console.error('jsQR library not loaded!');
+          return false;
+        }
+        
+        // Check if MediaDevices API is available
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          console.error('MediaDevices API not available in this browser');
+          return false;
+        }
+        
+        return window.webQRScanner.start((result) => {
+          console.log('QR code detected: ' + result.substring(0, 30) + '...');
+          // Send result back to Flutter
+          if (window.flutter_inappwebview) {
+            window.flutter_inappwebview.callHandler('onQRCodeDetected', result);
+          } else {
+            // For standard Flutter web
+            if (typeof window.onQRCodeDetected === 'function') {
+              window.onQRCodeDetected(result);
+            } else {
+              console.error('onQRCodeDetected function not found!');
+            }
+          }
+        });
+      } catch (e) {
+        console.error('Error starting QR scanner: ' + e.message);
+        return false;
+      }
+    };
+
+    // Initialize when page loads
+    window.addEventListener('load', async function() {
+      console.log('Page loaded, initializing camera...');
+      await requestCamera();
+      
+      // Set a global flag that Flutter can check
+      window.cameraPermissionRequested = true;
+    });
+    
     // Register service worker for PWA
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('flutter_service_worker.js?v=4211321674');
+        navigator.serviceWorker.register('flutter_service_worker.js?v=509960650')
+          .then(reg => console.log('Service worker registered'))
+          .catch(err => console.error(`Service worker error: ${err.message}`));
       });
     }
     
     // Hide loading indicator when app is loaded
     window.addEventListener('flutter-first-frame', function() {
+      console.log('Flutter app initialized');
       var loadingIndicator = document.getElementById('loading');
       if (loadingIndicator) {
         loadingIndicator.remove();

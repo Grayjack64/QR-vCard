@@ -87,40 +87,6 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
-
-    #cameraDebug {
-      position: fixed;
-      top: 60px;
-      right: 0;
-      width: 250px;
-      background: rgba(0,0,0,0.7);
-      color: white;
-      padding: 10px;
-      font-family: monospace;
-      z-index: 9999;
-      max-height: 30vh;
-      overflow-y: auto;
-      font-size: 10px;
-      opacity: 0.8;
-      border-radius: 0 0 0 8px;
-    }
-    
-    #debugToggle {
-      position: fixed;
-      bottom: 10px;
-      right: 10px;
-      background: rgba(0,0,0,0.5);
-      color: white;
-      border: none;
-      border-radius: 50%;
-      width: 40px;
-      height: 40px;
-      font-size: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 10000;
-    }
     
     #qrScannerContainer {
       display: none;
@@ -188,50 +154,6 @@
       cursor: pointer;
       pointer-events: auto;
     }
-    
-    #directTestBtn {
-      position: fixed;
-      top: 10px;
-      right: 10px;
-      background: #2196F3;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      padding: 8px 12px;
-      font-size: 14px;
-      z-index: 10000;
-      cursor: pointer;
-    }
-    
-    #minimizeDebugBtn {
-      position: absolute;
-      top: 5px;
-      right: 5px;
-      background: none;
-      border: none;
-      color: white;
-      font-size: 16px;
-      cursor: pointer;
-    }
-    
-    .debug-minimized {
-      height: 30px !important;
-      overflow: hidden !important;
-    }
-    
-    .debug-status {
-      font-weight: bold;
-      margin-bottom: 8px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    
-    /* Make debug visible by default but not block UI */
-    #cameraDebug {
-      display: block !important;
-      max-height: 200px !important;
-    }
   </style>
 </head>
 <body>
@@ -239,21 +161,6 @@
   <div class="loading" id="loading">
     <div class="loader"></div>
   </div>
-
-  <!-- Camera debug overlay (positioned in top-right corner) -->
-  <div id="cameraDebug">
-    <div class="debug-status">
-      <span>Camera Debug</span>
-      <button id="minimizeDebugBtn">-</button>
-    </div>
-    <div id="debugContent"></div>
-  </div>
-  
-  <!-- Debug toggle button -->
-  <button id="debugToggle">🐞</button>
-  
-  <!-- Direct test button (bypasses Flutter) -->
-  <button id="directTestBtn">Test Camera Directly</button>
   
   <!-- QR Scanner Container -->
   <div id="qrScannerContainer">
@@ -267,94 +174,27 @@
   </div>
   
   <script>
-    // Debug toggle flag - ON by default
-    let debugVisible = true;
-    let debugMinimized = false;
-    
-    // Clear existing debug log
-    document.getElementById('debugContent').innerHTML = '';
-    
-    // Debug logging function
-    function logDebug(message, isError = false) {
-      console.log(message);
-      
-      const debugElement = document.getElementById('debugContent');
-      if (debugElement) {
-        const logLine = document.createElement('div');
-        logLine.textContent = message;
-        
-        // Style errors differently
-        if (isError) {
-          logLine.style.color = '#ff6b6b';
-          logLine.style.fontWeight = 'bold';
-        }
-        
-        debugElement.appendChild(logLine);
-        // Scroll to bottom
-        debugElement.scrollTop = debugElement.scrollHeight;
-      }
-    }
-    
-    // Setup minimize debug button
-    document.getElementById('minimizeDebugBtn').addEventListener('click', function() {
-      const debugElement = document.getElementById('cameraDebug');
-      debugMinimized = !debugMinimized;
-      if (debugMinimized) {
-        debugElement.classList.add('debug-minimized');
-        this.textContent = '+';
-      } else {
-        debugElement.classList.remove('debug-minimized');
-        this.textContent = '-';
-      }
-    });
-    
-    // Function to log errors
+    // Function to log errors (quietly to console only)
     function logError(message) {
       console.error(message);
-      logDebug(`ERROR: ${message}`, true);
     }
 
-    // Add some immediate debug info
-    logDebug('🔍 DEBUG ENABLED - Page loading...');
-    logDebug('User Agent: ' + navigator.userAgent);
-    
-    // Log browser capabilities
-    logDebug('Browser capabilities check:');
-    logDebug('- navigator.mediaDevices: ' + (navigator.mediaDevices ? 'Available ✅' : 'Not available ❌'));
-    logDebug('- getUserMedia: ' + (navigator.mediaDevices?.getUserMedia ? 'Available ✅' : 'Not available ❌'));
-    logDebug('- jsQR loaded: ' + (typeof jsQR === 'function' ? 'Yes ✅' : 'No ❌'));
-    
-    // Handle direct test button
-    document.getElementById('directTestBtn').addEventListener('click', function() {
-      logDebug('📸 Direct camera test requested');
-      try {
-        window.webQRScanner.start(function(result) {
-          logDebug('QR code detected: ' + result.substring(0, 30) + '...');
-        });
-      } catch (e) {
-        logError('Error in direct test: ' + e.message);
-      }
-    });
-    
     // Show available cameras
     async function listCameras() {
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
         const cameras = devices.filter(device => device.kind === 'videoinput');
-        logDebug(`Found ${cameras.length} cameras:`);
-        cameras.forEach((camera, index) => {
-          logDebug(`${index+1}: ${camera.label || 'Unnamed camera'}`);
-        });
+        console.log(`Found ${cameras.length} cameras`);
         return cameras;
       } catch (err) {
-        logError(`Error listing cameras: ${err.message}`);
+        console.error(`Error listing cameras: ${err.message}`);
         return [];
       }
     }
 
     // Request camera permission with specific constraints
     async function requestCamera() {
-      logDebug('Requesting camera permission...');
+      console.log('Requesting camera permission...');
       try {
         // Try to get the back camera if available
         const cameras = await listCameras();
@@ -370,7 +210,7 @@
         if (cameras.length > 1) {
           // Typically the back camera is listed second
           const backCamera = cameras[cameras.length > 1 ? 1 : 0];
-          logDebug(`Trying to use camera: ${backCamera.label || 'Unnamed camera'}`);
+          console.log(`Trying to use camera: ${backCamera.label || 'Unnamed camera'}`);
           constraints = {
             video: {
               deviceId: { exact: backCamera.deviceId },
@@ -381,17 +221,16 @@
         }
 
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        logDebug('Camera permission granted!');
+        console.log('Camera permission granted!');
         
         // Stop the stream immediately
         stream.getTracks().forEach(track => {
-          logDebug(`Stopping track: ${track.kind}`);
           track.stop();
         });
         
         return true;
       } catch (error) {
-        logError(`Camera permission error: ${error.name} - ${error.message}`);
+        console.error(`Camera permission error: ${error.name} - ${error.message}`);
         return false;
       }
     }
@@ -413,18 +252,18 @@
       }
       
       async start(callback) {
-        logDebug('Starting web QR scanner');
+        console.log('Starting web QR scanner');
         this.onDetectedCallback = callback;
         
         try {
           // Verify DOM elements
           if (!this.video || !this.canvas || !this.container) {
-            logError('QR Scanner DOM elements not found');
+            console.error('QR Scanner DOM elements not found');
             return false;
           }
           
           // Get camera stream
-          logDebug('Requesting camera access...');
+          console.log('Requesting camera access...');
           const constraints = { 
             video: { 
               facingMode: 'environment',
@@ -436,17 +275,17 @@
           
           try {
             this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-            logDebug('Camera access granted!');
+            console.log('Camera access granted!');
           } catch (cameraError) {
-            logError(`Camera access denied: ${cameraError.name} - ${cameraError.message}`);
+            console.error(`Camera access denied: ${cameraError.name} - ${cameraError.message}`);
             
             // Try a simpler approach as fallback
-            logDebug('Trying fallback camera access...');
+            console.log('Trying fallback camera access...');
             try {
               this.stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-              logDebug('Fallback camera access granted!');
+              console.log('Fallback camera access granted!');
             } catch (fallbackError) {
-              logError(`Fallback camera access failed: ${fallbackError.message}`);
+              console.error(`Fallback camera access failed: ${fallbackError.message}`);
               return false;
             }
           }
@@ -456,33 +295,33 @@
           this.video.setAttribute('playsinline', true);
           this.video.setAttribute('autoplay', true);
           
-          logDebug('Video element configured, waiting for metadata...');
+          console.log('Video element configured, waiting for metadata...');
           
           // Wait for video to be ready
           await new Promise((resolve, reject) => {
             this.video.onloadedmetadata = () => {
-              logDebug('Video metadata loaded');
+              console.log('Video metadata loaded');
               resolve();
             };
             this.video.onerror = (e) => {
-              logError(`Video error: ${e}`);
+              console.error(`Video error: ${e}`);
               reject(new Error('Video loading failed'));
             };
             // Add a timeout
             setTimeout(() => {
               if (this.video.readyState === 0) {
-                logError('Video metadata loading timeout');
+                console.error('Video metadata loading timeout');
                 reject(new Error('Video metadata loading timeout'));
               }
             }, 5000);
           });
           
-          logDebug('Playing video...');
+          console.log('Playing video...');
           try {
             await this.video.play();
-            logDebug('Video playing!');
+            console.log('Video playing!');
           } catch (playError) {
-            logError(`Video play error: ${playError.message}`);
+            console.error(`Video play error: ${playError.message}`);
             return false;
           }
           
@@ -490,7 +329,7 @@
           this.canvas.width = this.video.videoWidth || 640;
           this.canvas.height = this.video.videoHeight || 480;
           
-          logDebug(`Canvas size set to ${this.canvas.width}x${this.canvas.height}`);
+          console.log(`Canvas size set to ${this.canvas.width}x${this.canvas.height}`);
           
           // Show scanner
           this.container.style.display = 'block';
@@ -499,10 +338,10 @@
           this.scanning = true;
           this.scanQRCode();
           
-          logDebug('Web QR scanner started successfully');
+          console.log('Web QR scanner started successfully');
           return true;
         } catch (error) {
-          logError(`Web QR scanner error: ${error.message}`);
+          console.error(`Web QR scanner error: ${error.message}`);
           return false;
         }
       }
@@ -513,7 +352,6 @@
         try {
           // Check if video is ready
           if (!this.video.videoWidth || !this.video.videoHeight) {
-            logDebug('Video not ready yet, retrying in 500ms...');
             setTimeout(() => this.scanQRCode(), 500);
             return;
           }
@@ -526,7 +364,7 @@
           
           // Check if jsQR is available
           if (typeof jsQR !== 'function') {
-            logError('jsQR not available for scanning');
+            console.error('jsQR not available for scanning');
             setTimeout(() => this.scanQRCode(), 1000);
             return;
           }
@@ -537,11 +375,11 @@
           });
           
           if (code && code.data) {
-            logDebug(`QR code detected: ${code.data.substring(0, 30)}...`);
+            console.log(`QR code detected: ${code.data.substring(0, 30)}...`);
             
             // Check if it's a vCard
             if (code.data.includes('BEGIN:VCARD') && code.data.includes('END:VCARD')) {
-              logDebug('Valid vCard QR code detected!');
+              console.log('Valid vCard QR code detected!');
               // Call callback with result
               if (this.onDetectedCallback) {
                 this.onDetectedCallback(code.data);
@@ -551,21 +389,21 @@
               this.close();
               return;
             } else {
-              logDebug('QR code does not contain vCard data, continuing scan...');
+              console.log('QR code does not contain vCard data, continuing scan...');
             }
           }
           
           // Continue scanning
           requestAnimationFrame(() => this.scanQRCode());
         } catch (error) {
-          logError(`Error in QR scanning: ${error.message}`);
+          console.error(`Error in QR scanning: ${error.message}`);
           // Try to continue scanning despite error
           setTimeout(() => this.scanQRCode(), 1000);
         }
       }
       
       close() {
-        logDebug('Closing web QR scanner');
+        console.log('Closing web QR scanner');
         this.scanning = false;
         
         // Hide scanner
@@ -584,29 +422,23 @@
     
     // Function to start scanning (called from Flutter)
     window.startQRScanner = function() {
-      // Always show debug when starting scanner
-      debugVisible = true;
-      document.getElementById('cameraDebug').style.display = 'block';
-      
-      logDebug('==== QR SCANNER STARTING ====');
-      logDebug('Navigator: ' + navigator.userAgent);
+      console.log('startQRScanner called from Flutter');
       
       try {
         // Check if jsQR is available
         if (typeof jsQR !== 'function') {
-          logError('jsQR library not loaded!');
+          console.error('jsQR library not loaded!');
           return false;
         }
         
         // Check if MediaDevices API is available
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          logError('MediaDevices API not available in this browser');
+          console.error('MediaDevices API not available in this browser');
           return false;
         }
         
-        logDebug('Starting QR scanner with WebQRScanner instance');
         return window.webQRScanner.start((result) => {
-          logDebug('QR code detected: ' + result.substring(0, 30) + '...');
+          console.log('QR code detected: ' + result.substring(0, 30) + '...');
           // Send result back to Flutter
           if (window.flutter_inappwebview) {
             window.flutter_inappwebview.callHandler('onQRCodeDetected', result);
@@ -615,19 +447,19 @@
             if (typeof window.onQRCodeDetected === 'function') {
               window.onQRCodeDetected(result);
             } else {
-              logError('onQRCodeDetected function not found!');
+              console.error('onQRCodeDetected function not found!');
             }
           }
         });
       } catch (e) {
-        logError('Error starting QR scanner: ' + e.message);
+        console.error('Error starting QR scanner: ' + e.message);
         return false;
       }
     };
 
     // Initialize when page loads
     window.addEventListener('load', async function() {
-      logDebug('Page loaded, initializing camera...');
+      console.log('Page loaded, initializing camera...');
       await requestCamera();
       
       // Set a global flag that Flutter can check
@@ -638,26 +470,17 @@
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
         navigator.serviceWorker.register('flutter_service_worker.js?v=509960650')
-          .then(reg => logDebug('Service worker registered'))
-          .catch(err => logError(`Service worker error: ${err.message}`));
+          .then(reg => console.log('Service worker registered'))
+          .catch(err => console.error(`Service worker error: ${err.message}`));
       });
     }
     
     // Hide loading indicator when app is loaded
     window.addEventListener('flutter-first-frame', function() {
-      logDebug('Flutter app initialized');
+      console.log('Flutter app initialized');
       var loadingIndicator = document.getElementById('loading');
       if (loadingIndicator) {
         loadingIndicator.remove();
-      }
-    });
-
-    // Setup debug toggle button
-    document.getElementById('debugToggle').addEventListener('click', function() {
-      const debugElement = document.getElementById('cameraDebug');
-      debugVisible = !debugVisible;
-      if (debugElement) {
-        debugElement.style.display = debugVisible ? 'block' : 'none';
       }
     });
   </script>
