@@ -44,6 +44,19 @@
   <!-- Add jsQR library for QR scanning -->
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
   
+  <!-- Add a fallback in case CDN fails -->
+  <script>
+    // Check if jsQR loaded
+    if (typeof jsQR !== 'function') {
+      console.error('jsQR library failed to load from CDN, attempting to load from fallback');
+      // Create a new script element
+      var jsQRScript = document.createElement('script');
+      jsQRScript.src = 'https://unpkg.com/jsqr@1.4.0/dist/jsQR.min.js';
+      jsQRScript.async = false;
+      document.head.appendChild(jsQRScript);
+    }
+  </script>
+  
   <style>
     body {
       background-color: #f5f5f5;
@@ -319,31 +332,80 @@
         this.onDetectedCallback = callback;
         
         try {
+          // Verify DOM elements
+          if (!this.video || !this.canvas || !this.container) {
+            logError('QR Scanner DOM elements not found');
+            return false;
+          }
+          
           // Get camera stream
+          logDebug('Requesting camera access...');
           const constraints = { 
             video: { 
               facingMode: 'environment',
               width: { ideal: 1280 },
               height: { ideal: 720 }
-            } 
+            },
+            audio: false
           };
           
-          this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+          try {
+            this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+            logDebug('Camera access granted!');
+          } catch (cameraError) {
+            logError(`Camera access denied: ${cameraError.name} - ${cameraError.message}`);
+            
+            // Try a simpler approach as fallback
+            logDebug('Trying fallback camera access...');
+            try {
+              this.stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+              logDebug('Fallback camera access granted!');
+            } catch (fallbackError) {
+              logError(`Fallback camera access failed: ${fallbackError.message}`);
+              return false;
+            }
+          }
+          
+          // Set video source
           this.video.srcObject = this.stream;
           this.video.setAttribute('playsinline', true);
+          this.video.setAttribute('autoplay', true);
+          
+          logDebug('Video element configured, waiting for metadata...');
           
           // Wait for video to be ready
-          await new Promise(resolve => {
+          await new Promise((resolve, reject) => {
             this.video.onloadedmetadata = () => {
+              logDebug('Video metadata loaded');
               resolve();
             };
+            this.video.onerror = (e) => {
+              logError(`Video error: ${e}`);
+              reject(new Error('Video loading failed'));
+            };
+            // Add a timeout
+            setTimeout(() => {
+              if (this.video.readyState === 0) {
+                logError('Video metadata loading timeout');
+                reject(new Error('Video metadata loading timeout'));
+              }
+            }, 5000);
           });
           
-          await this.video.play();
+          logDebug('Playing video...');
+          try {
+            await this.video.play();
+            logDebug('Video playing!');
+          } catch (playError) {
+            logError(`Video play error: ${playError.message}`);
+            return false;
+          }
           
           // Set canvas dimensions
-          this.canvas.width = this.video.videoWidth;
-          this.canvas.height = this.video.videoHeight;
+          this.canvas.width = this.video.videoWidth || 640;
+          this.canvas.height = this.video.videoHeight || 480;
+          
+          logDebug(`Canvas size set to ${this.canvas.width}x${this.canvas.height}`);
           
           // Show scanner
           this.container.style.display = 'block';
@@ -352,7 +414,7 @@
           this.scanning = true;
           this.scanQRCode();
           
-          logDebug('Web QR scanner started');
+          logDebug('Web QR scanner started successfully');
           return true;
         } catch (error) {
           logError(`Web QR scanner error: ${error.message}`);
@@ -363,35 +425,58 @@
       scanQRCode() {
         if (!this.scanning) return;
         
-        // Draw video frame to canvas
-        this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
-        
-        // Get image data
-        const imageData = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
-        
-        // Scan for QR code
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: "dontInvert",
-        });
-        
-        if (code && code.data) {
-          logDebug(`QR code detected: ${code.data}`);
-          
-          // Check if it's a vCard
-          if (code.data.includes('BEGIN:VCARD') && code.data.includes('END:VCARD')) {
-            // Call callback with result
-            if (this.onDetectedCallback) {
-              this.onDetectedCallback(code.data);
-            }
-            
-            // Stop scanning
-            this.close();
+        try {
+          // Check if video is ready
+          if (!this.video.videoWidth || !this.video.videoHeight) {
+            logDebug('Video not ready yet, retrying in 500ms...');
+            setTimeout(() => this.scanQRCode(), 500);
             return;
           }
+          
+          // Draw video frame to canvas
+          this.ctx.drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
+          
+          // Get image data
+          const imageData = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
+          
+          // Check if jsQR is available
+          if (typeof jsQR !== 'function') {
+            logError('jsQR not available for scanning');
+            setTimeout(() => this.scanQRCode(), 1000);
+            return;
+          }
+          
+          // Scan for QR code
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "dontInvert",
+          });
+          
+          if (code && code.data) {
+            logDebug(`QR code detected: ${code.data.substring(0, 30)}...`);
+            
+            // Check if it's a vCard
+            if (code.data.includes('BEGIN:VCARD') && code.data.includes('END:VCARD')) {
+              logDebug('Valid vCard QR code detected!');
+              // Call callback with result
+              if (this.onDetectedCallback) {
+                this.onDetectedCallback(code.data);
+              }
+              
+              // Stop scanning
+              this.close();
+              return;
+            } else {
+              logDebug('QR code does not contain vCard data, continuing scan...');
+            }
+          }
+          
+          // Continue scanning
+          requestAnimationFrame(() => this.scanQRCode());
+        } catch (error) {
+          logError(`Error in QR scanning: ${error.message}`);
+          // Try to continue scanning despite error
+          setTimeout(() => this.scanQRCode(), 1000);
         }
-        
-        // Continue scanning
-        requestAnimationFrame(() => this.scanQRCode());
       }
       
       close() {
@@ -414,8 +499,27 @@
     
     // Function to start scanning (called from Flutter)
     window.startQRScanner = function() {
-      logDebug('startQRScanner called from Flutter');
+      // Always show debug when starting scanner
+      debugVisible = true;
+      document.getElementById('cameraDebug').style.display = 'block';
+      
+      logDebug('==== QR SCANNER STARTING ====');
+      logDebug('Navigator: ' + navigator.userAgent);
+      
       try {
+        // Check if jsQR is available
+        if (typeof jsQR !== 'function') {
+          logError('jsQR library not loaded!');
+          return false;
+        }
+        
+        // Check if MediaDevices API is available
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          logError('MediaDevices API not available in this browser');
+          return false;
+        }
+        
+        logDebug('Starting QR scanner with WebQRScanner instance');
         return window.webQRScanner.start((result) => {
           logDebug('QR code detected: ' + result.substring(0, 30) + '...');
           // Send result back to Flutter
