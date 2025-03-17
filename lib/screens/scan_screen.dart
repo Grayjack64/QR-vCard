@@ -7,6 +7,8 @@ import 'dart:async';
 import '../models/vcard_model.dart';
 
 class ScanScreen extends StatefulWidget {
+  const ScanScreen({Key? key}) : super(key: key);
+
   @override
   _ScanScreenState createState() => _ScanScreenState();
 }
