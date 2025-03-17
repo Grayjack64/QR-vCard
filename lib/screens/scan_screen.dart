@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'dart:js' as js;
 import 'dart:async';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/vcard_model.dart';
 
@@ -21,6 +22,7 @@ class _ScanScreenState extends State<ScanScreen> {
   bool _showErrorIcon = false;
   bool _isWeb = false;
   bool _webScannerInitialized = false;
+  bool _showFallbackOption = false;
 
   // More reliable browser detection function that works on all devices
   bool isBrowser() {
@@ -73,7 +75,19 @@ class _ScanScreenState extends State<ScanScreen> {
 
     try {
       // Call JavaScript function to start the scanner
-      js.context.callMethod('startQRScanner');
+      final bool success = js.context.callMethod('startQRScanner');
+
+      if (success == false) {
+        // If the scanner fails to start, show the fallback option
+        setState(() {
+          _errorMessage =
+              'Failed to access camera. Try the standalone scanner instead.';
+          _showErrorIcon = true;
+          _showFallbackOption = true;
+        });
+        return;
+      }
+
       setState(() {
         _webScannerInitialized = true;
       });
@@ -81,8 +95,19 @@ class _ScanScreenState extends State<ScanScreen> {
       setState(() {
         _errorMessage = 'Failed to start web scanner: $e';
         _showErrorIcon = true;
+        _showFallbackOption = true;
       });
       print('Error starting web scanner: $e');
+    }
+  }
+
+  // Launch the fallback scanner
+  Future<void> _openFallbackScanner() async {
+    final Uri url = Uri.parse('scanner-fallback.html');
+    if (!await launchUrl(url)) {
+      setState(() {
+        _errorMessage = 'Could not launch fallback scanner';
+      });
     }
   }
 
@@ -170,6 +195,25 @@ class _ScanScreenState extends State<ScanScreen> {
                 _errorMessage,
                 style: TextStyle(color: Colors.red),
                 textAlign: TextAlign.center,
+              ),
+            ),
+          if (_showFallbackOption)
+            Padding(
+              padding: const EdgeInsets.only(top: 20.0),
+              child: Column(
+                children: [
+                  Text('Having trouble with the camera?',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  SizedBox(height: 10),
+                  ElevatedButton.icon(
+                    onPressed: _openFallbackScanner,
+                    icon: Icon(Icons.launch),
+                    label: Text('Try Standalone Scanner'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                    ),
+                  ),
+                ],
               ),
             ),
         ],

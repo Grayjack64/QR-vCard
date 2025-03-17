@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR vCard Scanner</title>
+  
+  <!-- Add jsQR library for QR scanning -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+  
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f5f5f5;
+    }
+    
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    
+    h1 {
+      text-align: center;
+      color: #2196F3;
+    }
+    
+    .scanner-container {
+      width: 100%;
+      max-width: 500px;
+      margin: 0 auto;
+      position: relative;
+      overflow: hidden;
+      border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    
+    #video {
+      width: 100%;
+      display: block;
+    }
+    
+    #canvas {
+      display: none;
+    }
+    
+    .scanner-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    
+    .scanner-frame {
+      width: 200px;
+      height: 200px;
+      border: 2px solid #ffffff;
+      border-radius: 8px;
+      box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.3);
+    }
+    
+    .button {
+      display: block;
+      width: 100%;
+      max-width: 300px;
+      margin: 20px auto;
+      padding: 12px;
+      background-color: #2196F3;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    
+    .button:disabled {
+      background-color: #cccccc;
+    }
+    
+    .status {
+      text-align: center;
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 4px;
+    }
+    
+    .success {
+      background-color: #d4edda;
+      color: #155724;
+    }
+    
+    .error {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+    
+    .info {
+      background-color: #e2f3fd;
+      color: #0c5460;
+    }
+    
+    #result {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      display: none;
+    }
+    
+    pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      background-color: #f8f9fa;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>QR vCard Scanner</h1>
+    
+    <div id="status" class="status info">Click "Start Camera" to begin scanning</div>
+    
+    <button id="startButton" class="button">Start Camera</button>
+    
+    <div class="scanner-container" id="scannerContainer" style="display: none;">
+      <video id="video" playsinline></video>
+      <canvas id="canvas"></canvas>
+      <div class="scanner-overlay">
+        <div class="scanner-frame"></div>
+      </div>
+    </div>
+    
+    <div id="result">
+      <h2>Scanned vCard:</h2>
+      <pre id="vCardContent"></pre>
+      <button id="copyButton" class="button">Copy to Clipboard</button>
+      <button id="newScanButton" class="button">Scan Another</button>
+    </div>
+  </div>
+  
+  <script>
+    // Elements
+    const startButton = document.getElementById('startButton');
+    const scannerContainer = document.getElementById('scannerContainer');
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const result = document.getElementById('result');
+    const vCardContent = document.getElementById('vCardContent');
+    const copyButton = document.getElementById('copyButton');
+    const newScanButton = document.getElementById('newScanButton');
+    const statusElement = document.getElementById('status');
+    
+    // Canvas context
+    const ctx = canvas.getContext('2d');
+    
+    // Scanner state
+    let scanning = false;
+    let stream = null;
+    
+    // Show status message
+    function showStatus(message, type = 'info') {
+      statusElement.textContent = message;
+      statusElement.className = 'status ' + type;
+    }
+    
+    // Start camera and scanning
+    async function startScanner() {
+      try {
+        // Check if jsQR is loaded
+        if (typeof jsQR !== 'function') {
+          showStatus('QR scanning library failed to load. Please refresh and try again.', 'error');
+          return;
+        }
+        
+        showStatus('Requesting camera access...', 'info');
+        
+        // Request camera
+        const constraints = { 
+          video: { 
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        };
+        
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (e) {
+          console.log('Error with environment camera, trying fallback', e);
+          // Try simpler constraints as fallback
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
+        
+        video.srcObject = stream;
+        video.setAttribute('playsinline', true);
+        
+        // Wait for video to be ready
+        await new Promise(resolve => {
+          video.onloadedmetadata = resolve;
+        });
+        
+        await video.play();
+        
+        // Set canvas size
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        
+        // Show scanner
+        scannerContainer.style.display = 'block';
+        startButton.disabled = true;
+        
+        // Start scanning
+        scanning = true;
+        showStatus('Camera active - point at a QR code', 'info');
+        scanQRCode();
+        
+      } catch (error) {
+        showStatus('Camera error: ' + error.message, 'error');
+        console.error('Scanner error:', error);
+      }
+    }
+    
+    // Scan for QR codes
+    function scanQRCode() {
+      if (!scanning) return;
+      
+      // Draw video frame to canvas
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      // Get image data
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      
+      // Scan for QR code
+      const code = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: "dontInvert",
+      });
+      
+      if (code && code.data) {
+        // Check if it's a vCard
+        if (code.data.includes('BEGIN:VCARD') && code.data.includes('END:VCARD')) {
+          // Found vCard QR code
+          handleVCard(code.data);
+          return;
+        }
+      }
+      
+      // Continue scanning
+      requestAnimationFrame(scanQRCode);
+    }
+    
+    // Handle detected vCard
+    function handleVCard(data) {
+      // Stop scanning
+      scanning = false;
+      
+      // Stop camera
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+      }
+      
+      // Hide scanner
+      scannerContainer.style.display = 'none';
+      
+      // Show result
+      vCardContent.textContent = data;
+      result.style.display = 'block';
+      
+      // Show success message
+      showStatus('vCard QR code detected!', 'success');
+      
+      // Re-enable start button
+      startButton.disabled = false;
+    }
+    
+    // Copy vCard to clipboard
+    function copyToClipboard() {
+      navigator.clipboard.writeText(vCardContent.textContent)
+        .then(() => {
+          showStatus('vCard copied to clipboard!', 'success');
+        })
+        .catch(err => {
+          showStatus('Failed to copy: ' + err, 'error');
+        });
+    }
+    
+    // Restart scanning
+    function newScan() {
+      result.style.display = 'none';
+      showStatus('Click "Start Camera" to begin scanning', 'info');
+    }
+    
+    // Event listeners
+    startButton.addEventListener('click', startScanner);
+    copyButton.addEventListener('click', copyToClipboard);
+    newScanButton.addEventListener('click', newScan);
+  </script>
+</body>
+</html> 

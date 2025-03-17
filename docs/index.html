@@ -188,6 +188,28 @@
       cursor: pointer;
       pointer-events: auto;
     }
+    
+    #directTestBtn {
+      position: fixed;
+      top: 60px;
+      right: 10px;
+      background: #2196F3;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 12px;
+      font-size: 14px;
+      z-index: 10000;
+      cursor: pointer;
+    }
+    
+    /* Make debug visible by default */
+    #cameraDebug {
+      display: block !important;
+      opacity: 1 !important;
+      max-height: 40vh !important;
+      font-size: 12px !important;
+    }
   </style>
 </head>
 <body>
@@ -196,11 +218,14 @@
     <div class="loader"></div>
   </div>
 
-  <!-- Camera debug overlay (completely hidden by default) -->
-  <div id="cameraDebug" style="display: none;"></div>
+  <!-- Camera debug overlay (visible by default now) -->
+  <div id="cameraDebug" style="display: block;"></div>
   
   <!-- Debug toggle button -->
   <button id="debugToggle">🐞</button>
+  
+  <!-- Direct test button (bypasses Flutter) -->
+  <button id="directTestBtn">Test Camera Directly</button>
   
   <!-- QR Scanner Container -->
   <div id="qrScannerContainer">
@@ -214,22 +239,15 @@
   </div>
   
   <script>
-    // Debug toggle flag
-    let debugVisible = false;
+    // Debug toggle flag - ON by default
+    let debugVisible = true;
     
     // Debug logging function
     function logDebug(message, isError = false) {
       console.log(message);
-      // Don't show debug overlay for normal messages
-      if (!debugVisible && !isError) return;
       
       const debugElement = document.getElementById('cameraDebug');
       if (debugElement) {
-        if (isError) {
-          // Make sure the debug is shown for errors
-          debugElement.style.display = 'block';
-        }
-        
         const logLine = document.createElement('div');
         logLine.textContent = message;
         
@@ -251,6 +269,28 @@
       logDebug(`ERROR: ${message}`, true);
     }
 
+    // Add some immediate debug info
+    logDebug('🔍 DEBUG ENABLED - Page loading...');
+    logDebug('User Agent: ' + navigator.userAgent);
+    
+    // Log browser capabilities
+    logDebug('Browser capabilities check:');
+    logDebug('- navigator.mediaDevices: ' + (navigator.mediaDevices ? 'Available ✅' : 'Not available ❌'));
+    logDebug('- getUserMedia: ' + (navigator.mediaDevices?.getUserMedia ? 'Available ✅' : 'Not available ❌'));
+    logDebug('- jsQR loaded: ' + (typeof jsQR === 'function' ? 'Yes ✅' : 'No ❌'));
+    
+    // Handle direct test button
+    document.getElementById('directTestBtn').addEventListener('click', function() {
+      logDebug('📸 Direct camera test requested');
+      try {
+        window.webQRScanner.start(function(result) {
+          logDebug('QR code detected: ' + result.substring(0, 30) + '...');
+        });
+      } catch (e) {
+        logError('Error in direct test: ' + e.message);
+      }
+    });
+    
     // Show available cameras
     async function listCameras() {
       try {
